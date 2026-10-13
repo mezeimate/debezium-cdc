@@ -1,5 +1,13 @@
-artifacts/*
-!artifacts/.gitkeep
-__pycache__/
-*.zip
+# Logs
 *.log
+
+# Archives / temporary packages
+*.zip
+
+# IDE
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
