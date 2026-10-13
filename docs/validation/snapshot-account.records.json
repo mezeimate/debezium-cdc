@@ -1,0 +1,82 @@
+[
+  {
+    "offset": 0,
+    "key": {
+      "id": 1001
+    },
+    "value": {
+      "before": null,
+      "after": {
+        "id": 1001,
+        "owner_name": "Kiss Anna",
+        "balance": "150000.00",
+        "currency": "HUF",
+        "created_at": 1791890593207
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890743000,
+        "snapshot": "first",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890743000000,
+        "ts_ns": 1791890743000000000,
+        "table": "ACCOUNT",
+        "server_id": 0,
+        "gtid": null,
+        "file": "mysql-bin.000003",
+        "pos": 197,
+        "row": 0,
+        "thread": null,
+        "query": null
+      },
+      "transaction": null,
+      "op": "r",
+      "ts_ms": 1791890743585,
+      "ts_us": 1791890743585491,
+      "ts_ns": 1791890743585491555
+    }
+  },
+  {
+    "offset": 1,
+    "key": {
+      "id": 1002
+    },
+    "value": {
+      "before": null,
+      "after": {
+        "id": 1002,
+        "owner_name": "Nagy Peter",
+        "balance": "250000.00",
+        "currency": "HUF",
+        "created_at": 1791890593207
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890743000,
+        "snapshot": "last_in_data_collection",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890743000000,
+        "ts_ns": 1791890743000000000,
+        "table": "ACCOUNT",
+        "server_id": 0,
+        "gtid": null,
+        "file": "mysql-bin.000003",
+        "pos": 197,
+        "row": 0,
+        "thread": null,
+        "query": null
+      },
+      "transaction": null,
+      "op": "r",
+      "ts_ms": 1791890743587,
+      "ts_us": 1791890743587959,
+      "ts_ns": 1791890743587959070
+    }
+  }
+]

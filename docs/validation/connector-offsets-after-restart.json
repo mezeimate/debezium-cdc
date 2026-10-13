@@ -1,0 +1,18 @@
+{
+  "offsets": [
+    {
+      "partition": {
+        "server": "bank-cdc"
+      },
+      "offset": {
+        "ts_sec": 1791890896,
+        "file": "mysql-bin.000003",
+        "pos": 2494,
+        "gtids": "77624b76-c6f8-11f1-8385-3ee07d819ac2:1-21",
+        "row": 1,
+        "server_id": 1,
+        "event": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+[
+  {
+    "offset": 0,
+    "key": {
+      "id": 1
+    },
+    "value": {
+      "before": null,
+      "after": {
+        "id": 1,
+        "account_id": 1001,
+        "amount": "12500.00",
+        "currency": "HUF",
+        "status": "COMPLETED",
+        "created_at": 1791890593210,
+        "updated_at": 1791890593210
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890743000,
+        "snapshot": "first_in_data_collection",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890743000000,
+        "ts_ns": 1791890743000000000,
+        "table": "PAYMENT",
+        "server_id": 0,
+        "gtid": null,
+        "file": "mysql-bin.000003",
+        "pos": 197,
+        "row": 0,
+        "thread": null,
+        "query": null
+      },
+      "transaction": null,
+      "op": "r",
+      "ts_ms": 1791890743591,
+      "ts_us": 1791890743591056,
+      "ts_ns": 1791890743591056681
+    }
+  },
+  {
+    "offset": 1,
+    "key": {
+      "id": 2
+    },
+    "value": {
+      "before": null,
+      "after": {
+        "id": 2,
+        "account_id": 1002,
+        "amount": "3400.00",
+        "currency": "HUF",
+        "status": "PENDING",
+        "created_at": 1791890593210,
+        "updated_at": 1791890593210
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890743000,
+        "snapshot": "last",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890743000000,
+        "ts_ns": 1791890743000000000,
+        "table": "PAYMENT",
+        "server_id": 0,
+        "gtid": null,
+        "file": "mysql-bin.000003",
+        "pos": 197,
+        "row": 0,
+        "thread": null,
+        "query": null
+      },
+      "transaction": null,
+      "op": "r",
+      "ts_ms": 1791890743591,
+      "ts_us": 1791890743591539,
+      "ts_ns": 1791890743591539035
+    }
+  }
+]

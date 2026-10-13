@@ -1,0 +1,143 @@
+[
+  {
+    "offset": 2,
+    "key": {
+      "id": 9901
+    },
+    "value": {
+      "before": null,
+      "after": {
+        "id": 9901,
+        "account_id": 1001,
+        "amount": "88.00",
+        "currency": "HUF",
+        "status": "PENDING",
+        "created_at": 1791890874943,
+        "updated_at": 1791890874943
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890874944,
+        "snapshot": "false",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890874944103,
+        "ts_ns": 1791890874944103000,
+        "table": "PAYMENT",
+        "server_id": 1,
+        "gtid": "77624b76-c6f8-11f1-8385-3ee07d819ac2:16",
+        "file": "mysql-bin.000003",
+        "pos": 433,
+        "row": 0,
+        "thread": 75,
+        "query": null
+      },
+      "transaction": null,
+      "op": "c",
+      "ts_ms": 1791890874955,
+      "ts_us": 1791890874955528,
+      "ts_ns": 1791890874955528503
+    }
+  },
+  {
+    "offset": 3,
+    "key": {
+      "id": 9901
+    },
+    "value": {
+      "before": {
+        "id": 9901,
+        "account_id": 1001,
+        "amount": "88.00",
+        "currency": "HUF",
+        "status": "PENDING",
+        "created_at": 1791890874943,
+        "updated_at": 1791890874943
+      },
+      "after": {
+        "id": 9901,
+        "account_id": 1001,
+        "amount": "123.45",
+        "currency": "HUF",
+        "status": "COMPLETED",
+        "created_at": 1791890874943,
+        "updated_at": 1791890874944
+      },
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890874945,
+        "snapshot": "false",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890874945715,
+        "ts_ns": 1791890874945715000,
+        "table": "PAYMENT",
+        "server_id": 1,
+        "gtid": "77624b76-c6f8-11f1-8385-3ee07d819ac2:17",
+        "file": "mysql-bin.000003",
+        "pos": 793,
+        "row": 0,
+        "thread": 75,
+        "query": null
+      },
+      "transaction": null,
+      "op": "u",
+      "ts_ms": 1791890874962,
+      "ts_us": 1791890874962886,
+      "ts_ns": 1791890874962886813
+    }
+  },
+  {
+    "offset": 4,
+    "key": {
+      "id": 9901
+    },
+    "value": {
+      "before": {
+        "id": 9901,
+        "account_id": 1001,
+        "amount": "123.45",
+        "currency": "HUF",
+        "status": "COMPLETED",
+        "created_at": 1791890874943,
+        "updated_at": 1791890874944
+      },
+      "after": null,
+      "source": {
+        "version": "3.0.8.Final",
+        "connector": "mysql",
+        "name": "bank-cdc",
+        "ts_ms": 1791890874947,
+        "snapshot": "false",
+        "db": "bank",
+        "sequence": null,
+        "ts_us": 1791890874947451,
+        "ts_ns": 1791890874947451000,
+        "table": "PAYMENT",
+        "server_id": 1,
+        "gtid": "77624b76-c6f8-11f1-8385-3ee07d819ac2:18",
+        "file": "mysql-bin.000003",
+        "pos": 1184,
+        "row": 0,
+        "thread": 75,
+        "query": null
+      },
+      "transaction": null,
+      "op": "d",
+      "ts_ms": 1791890874964,
+      "ts_us": 1791890874964262,
+      "ts_ns": 1791890874964262359
+    }
+  },
+  {
+    "offset": 5,
+    "key": {
+      "id": 9901
+    },
+    "value": null
+  }
+]
