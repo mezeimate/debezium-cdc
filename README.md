@@ -76,7 +76,7 @@ docker compose up -d --wait
 
 ## 2. Adminer megnyitása
 
-Nyisd meg: <http://localhost:8080>.
+Nyisd meg: <http://localhost:18080>.
 
 | Bejelentkezési mező | Érték |
 | --- | --- |
