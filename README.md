@@ -1,203 +1,466 @@
 # Debezium CDC banki gyakorlólab
 
-Ebben a projektben egy MySQL-adatbázis `ACCOUNT` és `PAYMENT` tábláinak változásait nézheted meg Kafka-üzenetként. A Debezium először beolvassa a már létező sorokat (**snapshot**), majd a MySQL binlogból folyamatosan követi az új változásokat (**streaming**). Adminerben SQL-t futtathatsz, a Kafka UI-ban pedig megnézheted a hozzájuk tartozó eseményeket.
+Ez a projekt arra való, hogy helyben, egyszerűen kipróbáld a CDC működését:
 
 ```text
-MySQL → Debezium MySQL connector a Kafka Connectben → Kafka → Kafka UI
-  ↑
-Adminer
+MySQL
+  ↓ binlog
+Debezium MySQL Connector
+  ↓
+Kafka Connect
+  ↓
+Kafka
+  ↓
+Kafka UI
 ```
 
-Ez helyi fejlesztői lab, ismert gyakorlójelszavakkal és titkosítás nélkül. A közzétett portok csak a laptopod `127.0.0.1` címén érhetők el. Dockeres környezeten belül a konténerek szolgáltatásnévvel kommunikálnak. Oracle, Spring Boot, Avro, Schema Registry, Kubernetes és SSL/SASL nem szükséges hozzá. A Kafka KRaft módban fut, ZooKeeper nélkül.
+A MySQL adatokat **Adminerben** tudod megnézni és módosítani, a keletkező CDC eseményeket pedig **Kafka UI-ban**.
 
-## Előfeltételek
+A lab helyi fejlesztői környezet. Ismert gyakorlójelszavakat és titkosítás nélküli kapcsolatokat használ, ezért production célra nem való.
 
-- Windows alatt Docker Desktop, Linux-konténerek és a WSL2 backend; Linuxon Docker Engine.
-- Docker Compose V2: a `docker compose version` parancsnak működnie kell.
-- Futó Docker daemon: a `docker info` parancs ne jelezzen kapcsolódási hibát.
-- Körülbelül 6 GB, Docker számára rendelkezésre álló memória és több GB szabad lemezterület.
-- Szabad helyi portok: `3306`, `8080`, `8081`, `8083`, `9092`.
-- Internet az első induláshoz, hogy Docker letölthesse az image-eket.
-- Windows PowerShell 5.1 vagy PowerShell 7. A bash változatokhoz bash és curl kell.
+---
 
-A parancsokat a projekt gyökérkönyvtárában futtasd, ahol a `docker-compose.yml` található. A `powershell -ExecutionPolicy Bypass -File ...` csak az adott folyamatra vonatkozik; nem változtatja meg tartósan a gép execution policy beállítását. PowerShell 7 használatakor a `powershell` helyett `pwsh` is használható.
+## 1. Mire van szükség?
 
-## Fájlok és szolgáltatások
+A lab futtatható **Dockerrel vagy Podmannel**.
 
-| Fájl | Feladat |
-| --- | --- |
-| `docker-compose.yml` | MySQL, Kafka, Kafka Connect/Debezium, Kafka UI és Adminer; hálózat, portok, állapotellenőrzések és tartós volume-ok. |
-| `mysql/init.sql` | A `bank` adatbázis, a CDC-felhasználó, a banki táblák és a kezdeti rekordok létrehozása az első MySQL-induláskor. |
-| `connectors/bank-mysql.json` | A `bank-mysql` connector regisztrációs JSON-ja; a MySQL kapcsolata, a két figyelt tábla, a topicnevek és a snapshot beállítása. |
-| `scripts/start.ps1`, `scripts/start.sh` | A Compose-szolgáltatások elindítása és a készenlét ellenőrzése. |
-| `scripts/register-connector.ps1`, `scripts/register-connector.sh` | A connector létrehozása vagy a már létező konfiguráció frissítése. |
-| `scripts/status.ps1`, `scripts/status.sh` | Connector- és taskstátusz lekérdezése. |
-| `scripts/demo.ps1`, `scripts/demo.sh` | Egy `PAYMENT` sor INSERT → UPDATE → DELETE bemutatója. |
-| `scripts/recovery-test.ps1`, `scripts/recovery-test.sh` | A Connect leállítása, közben SQL-módosítások, majd újraindítás és felzárkózás ellenőrzése. |
-| `scripts/common.ps1`, `scripts/common.sh` | A scriptek közös kapcsolódási, várakozási és Kafka-olvasási segédfüggvényei. |
-| `tests/verify_cdc.py` | Opcionális, automatikus ellenőrzés valódi Docker-szolgáltatások és Kafka-üzenetek alapján; Python standard libraryvel. |
-| `artifacts/` | Az automatikus teszt JSON-bizonyítékai, például státuszok, események és offsetek. |
-| `TEST-RESULTS.md` | A projekt elkészítésekor végzett tényleges ellenőrzések eredménye és az esetleges környezeti korlátok. |
-| `README.md` | A kézi megfigyelés, az események értelmezése és a helyi futtatás útmutatója. |
+### Docker
 
-| Szolgáltatás | Böngésző/helyi kliens | Konténerek közötti cím |
+Ellenőrzés:
+
+```powershell
+docker --version
+docker compose version
+```
+
+### Podman
+
+Ellenőrzés:
+
+```powershell
+podman --version
+podman compose version
+```
+
+A használt host portok:
+
+```text
+3306   MySQL
+18080  Adminer
+8081   Kafka UI
+8083   Kafka Connect REST API
+9092   Kafka
+```
+
+---
+
+## 2. A környezet elindítása
+
+A parancsokat a projekt gyökérkönyvtárában futtasd, ahol a `docker-compose.yml` található.
+
+### Docker
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+### Podman
+
+```powershell
+podman compose up -d
+podman ps
+```
+
+A fontos konténerek:
+
+```text
+mysql
+kafka
+connect
+kafka-ui
+adminer
+```
+
+A MySQL és a Kafka Connect állapota legyen `Healthy`.
+
+Az első indítás tovább tarthat, mert le kell tölteni az image-eket.
+
+---
+
+## 3. Mit indít el a Compose?
+
+| Szolgáltatás | Feladat | Helyi cím |
 | --- | --- | --- |
-| Adminer | <http://localhost:8080> | `adminer:8080` |
-| Kafka UI | <http://localhost:8081> | `kafka-ui:8080` |
-| Kafka Connect REST | <http://localhost:8083> | `connect:8083` |
-| MySQL | `localhost:3306` | `mysql:3306` |
-| Kafka broker | `localhost:9092` | `kafka:9092` |
+| MySQL | Source adatbázis | `localhost:3306` |
+| Adminer | MySQL webes kezelőfelület | <http://localhost:18080> |
+| Kafka | CDC események tárolása | `localhost:9092` |
+| Kafka Connect + Debezium | MySQL változások figyelése és Kafka felé továbbítása | <http://localhost:8083> |
+| Kafka UI | Topicok és üzenetek megtekintése | <http://localhost:8081> |
 
-Az `ACCOUNT` számlákat, a `PAYMENT` pedig számlához tartozó fizetéseket tartalmaz. A fizetés `account_id` mezője az `ACCOUNT.id` mezőre mutató idegen kulcs. A kezdeti számlaazonosítók `1001` és `1002`, a kezdeti fizetésazonosítók `1` és `2`. A demókhoz a `9001`, `9002` és `9003` azonosítókat használjuk; ezeket hagyd szabadon saját adataidhoz.
+A konténerek egymás között nem a host portokat használják.
 
-## 1. A teljes környezet elindítása
+Például az Adminer a MySQL-t ezen a címen éri el:
 
-Windows PowerShellből:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
-docker compose ps
+```text
+mysql:3306
 ```
 
-Linux/macOS alatt:
+Az Adminer maga a konténeren belül továbbra is a `8080` porton fut:
 
-```bash
-bash scripts/start.sh
-docker compose ps
+```text
+host:      localhost:18080
+                     ↓
+container: adminer:8080
 ```
 
-Az első image-letöltés és indulás néhány percig tarthat. A MySQL-init csak **üres MySQL-volume esetén** fut le; későbbi indításkor a már létrehozott adatbázis marad meg. Az indítás után a connector regisztrációja még külön lépés, hogy meg tudd figyelni a kezdeti snapshotot.
+---
 
-Kézi indításkor a megfelelő parancs:
+## 4. Adminer megnyitása
 
-```bash
-docker compose up -d --wait
-```
+Nyisd meg:
 
-## 2. Adminer megnyitása
+<http://localhost:18080>
 
-Nyisd meg: <http://localhost:18080>.
+Belépés:
 
-| Bejelentkezési mező | Érték |
+| Mező | Érték |
 | --- | --- |
-| Rendszer / System | `MySQL` |
-| Szerver / Server | `mysql` |
-| Felhasználó / Username | `bank` |
-| Jelszó / Password | `bank_lab_password` |
-| Adatbázis / Database | `bank` |
+| System | `MySQL` |
+| Server | `mysql` |
+| Username | `bank` |
+| Password | `bank_lab_password` |
+| Database | `bank` |
 
-A szerver mezőbe **`mysql`** kerül: az Adminer a saját konténeréből kapcsolódik. Válaszd ki az `ACCOUNT` és `PAYMENT` táblát, és nézd meg a kezdeti sorokat. Az **SQL parancs / SQL command** oldalon a README SQL-példáit is lefuttathatod.
+A `Server` mezőbe **`mysql`** kerül, mert az Adminer a Compose belső hálózatán ezen a service néven éri el a MySQL konténert.
 
-A connector külön `debezium` felhasználót használ, `debezium_lab_password` gyakorlójelszóval. A `bank` felhasználóval a banki adatokat nézheted és módosíthatod; a root gyakorlójelszót a Compose a MySQL kezdeti létrehozásához adja meg.
+Belépés után két fontos táblát látsz:
 
-## 3. Kafka UI megnyitása
+```text
+ACCOUNT
+PAYMENT
+```
 
-Nyisd meg: <http://localhost:8081>. Válaszd a helyi Kafka-klasztert, majd a **Topics** menüpontot. A connector regisztrálása előtt a két banki topic még nem feltétlenül létezik.
+Kezdetben például ezek az adatok vannak benne:
 
-A connector és taskjai a **Kafka Connect** nézetben is láthatók. A REST API-val a következő lépésekben külön is ellenőrizzük őket.
+```text
+ACCOUNT
+1001  Kiss Anna   150000.00 HUF
+1002  Nagy Peter  250000.00 HUF
 
-## 4. A Debezium connector regisztrálása
+PAYMENT
+1  1001  12500.00 HUF  COMPLETED
+2  1002   3400.00 HUF  PENDING
+```
 
-Windows:
+---
+
+## 5. Kafka UI megnyitása
+
+Nyisd meg:
+
+<http://localhost:8081>
+
+A cluster neve:
+
+```text
+bank-lab
+```
+
+A Debezium connector regisztrálása előtt a két CDC topic még nem feltétlenül létezik.
+
+Később ezeket fogod keresni:
+
+```text
+bank-cdc.bank.ACCOUNT
+bank-cdc.bank.PAYMENT
+```
+
+---
+
+## 6. A Debezium connector konfigurációja
+
+A konfiguráció itt található:
+
+```text
+connectors/bank-mysql.json
+```
+
+A fontosabb részek:
+
+```json
+"connector.class": "io.debezium.connector.mysql.MySqlConnector"
+```
+
+MySQL Debezium connectort használunk.
+
+```json
+"database.hostname": "mysql"
+```
+
+A `mysql` service-t figyeli.
+
+```json
+"database.user": "debezium"
+```
+
+A connector külön technikai DB usert használ.
+
+```json
+"database.include.list": "bank"
+```
+
+Csak a `bank` adatbázis érdekel.
+
+```json
+"table.include.list": "bank.ACCOUNT,bank.PAYMENT"
+```
+
+Csak ezt a két táblát figyeli.
+
+```json
+"topic.prefix": "bank-cdc"
+```
+
+Ezért lesz például:
+
+```text
+bank-cdc.bank.PAYMENT
+```
+
+```json
+"snapshot.mode": "initial"
+```
+
+Első induláskor a Debezium a már meglévő rekordokat is beolvassa.
+
+Utána folyamatosan a MySQL binlogból dolgozik.
+
+---
+
+## 7. A connector regisztrálása
+
+A környezet elindítása még nem hozza létre automatikusan a `bank-mysql` connectort.
+
+PowerShellből:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\register-connector.ps1
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8083/connectors `
+  -ContentType 'application/json' `
+  -Body (Get-Content -Raw .\connectors\bank-mysql.json)
 ```
 
-Bash:
+Ez történik:
 
-```bash
-bash scripts/register-connector.sh
+```text
+bank-mysql.json
+      ↓ HTTP POST
+Kafka Connect REST API
+      ↓
+bank-mysql Debezium connector
 ```
 
-A script a `connectors/bank-mysql.json` fájlból dolgozik. A connector neve `bank-mysql`; csak a `bank.ACCOUNT` és `bank.PAYMENT` táblát figyeli. A script újrafuttatható: a már meglévő connector konfigurációját frissíti, nem hoz létre új nevű connectort. A regisztráció sikeres REST-válasza után a connector indulása és a snapshot még aszinkron történik.
+Sikeres regisztráció után a válaszban megjelenik:
 
-Kézi, első regisztráció PowerShellben:
-
-```powershell
-$connector = Get-Content -Raw .\connectors\bank-mysql.json
-Invoke-RestMethod -Method Post -Uri http://localhost:8083/connectors `
-  -ContentType 'application/json' -Body $connector
+```text
+bank-mysql
 ```
 
-Kézi, első regisztráció bashből:
+> Ha a connector már létezik, az újabb POST `409 Conflict` hibát adhat. Ilyenkor nem kell újra létrehozni.
 
-```bash
-curl --fail-with-body -X POST http://localhost:8083/connectors \
-  -H 'Content-Type: application/json' \
-  --data-binary @connectors/bank-mysql.json
-```
+---
 
-A kézi `POST` már létező név esetén `409 Conflict` választ ad; ilyenkor használd az újrafuttatható regisztrációs scriptet.
+## 8. Connector státusz ellenőrzése
 
-## 5. A connector státuszának ellenőrzése
-
-Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\status.ps1
-```
-
-Bash:
-
-```bash
-bash scripts/status.sh
-```
-
-Közvetlen lekérdezés PowerShellben:
+PowerShell:
 
 ```powershell
 Invoke-RestMethod http://localhost:8083/connectors/bank-mysql/status |
   ConvertTo-Json -Depth 10
 ```
 
-A connector és az egyetlen task állapota is **`RUNNING`** legyen:
+Ezt keresd:
+
+```text
+connector.state = RUNNING
+tasks[0].state   = RUNNING
+```
+
+Példa:
 
 ```json
 {
   "name": "bank-mysql",
-  "connector": { "state": "RUNNING" },
-  "tasks": [{ "id": 0, "state": "RUNNING" }]
+  "connector": {
+    "state": "RUNNING"
+  },
+  "tasks": [
+    {
+      "id": 0,
+      "state": "RUNNING"
+    }
+  ],
+  "type": "source"
 }
 ```
 
-Ez rövidített példa; a valódi válasz további mezőket is tartalmaz. A `RUNNING` állapot önmagában még nem bizonyítja a snapshot végét. A kezdeti rekordok megjelenése és a streamingesemények feldolgozása adja a használható ellenőrzést.
+A `type = source` azt jelzi, hogy ez egy source connector: a MySQL-ből olvas változásokat.
 
-Hiba esetén nézd meg a státuszban a `trace` mezőt, illetve:
+---
 
-```bash
-docker compose logs --tail=150 connect
-docker compose logs --tail=100 mysql
+## 9. A kezdeti snapshot megfigyelése
+
+Kafka UI:
+
+```text
+Topics
+  → bank-cdc.bank.PAYMENT
+  → Messages
 ```
 
-## 6. A snapshot során keletkező események
+Állítsd a kezdőpozíciót `Beginning / earliest` értékre.
 
-A Kafka UI **Topics** listájában keresd ezt a két topicot:
-
-- `bank-cdc.bank.ACCOUNT`
-- `bank-cdc.bank.PAYMENT`
-
-Nyisd meg valamelyiket, válaszd a **Messages** fület, és a kezdőpozíciót állítsd **Beginning / earliest** értékre. Ha szükséges, indíts új keresést vagy frissítsd a listát. Az újabb üzenetekhez kapcsolódó nézetbeállítás nem mutatja a korábban létrejött snapshotüzeneteket.
-
-Nyisd ki egy kezdeti sor üzenetét. Az érték JSON, az `op` mező **`r`** (*read*), az `after` pedig a beolvasott adatbázissor. Snapshotban a `before` általában `null`. A `source.snapshot` mező a snapshot állapotáról is információt ad: `first`, `true`, `last_in_data_collection` és `last` értékkel is találkozhatsz. Ezek a snapshot első sorát, köztes sorát, egy tábla utolsó sorát, illetve az egész snapshot utolsó sorát jelölhetik. A snapshotesemény felismerésének biztos támpontja az **`op=r`**; nem csak a `source.snapshot="true"` értéket kell keresni.
+Az induláskor már létező sorok ilyen eventként jelennek meg:
 
 ```json
 {
   "before": null,
-  "after": { "id": 1, "account_id": 1001, "amount": "12500.00" },
-  "source": { "db": "bank", "table": "PAYMENT", "snapshot": "true" },
-  "op": "r",
-  "ts_ms": 1760000000000
+  "after": {
+    "id": 1,
+    "account_id": 1001,
+    "amount": "12500.00",
+    "currency": "HUF",
+    "status": "COMPLETED"
+  },
+  "source": {
+    "db": "bank",
+    "table": "PAYMENT",
+    "snapshot": "first_in_data_collection"
+  },
+  "op": "r"
 }
 ```
 
-Ez szemléltető, rövidített példa, nem a kezdeti rekord teljes, pontos másolata. A project JSON-converterei nem csomagolják az adatot `schema`/`payload` mezőkbe: a `before`, `after`, `source`, `op` és `ts_ms` közvetlenül az esemény tetején található.
+A lényeg:
 
-## 7. INSERT, UPDATE és DELETE végrehajtása
+```text
+op = r        snapshot read
+before = null nincs korábbi állapot
+after         a beolvasott sor
+```
 
-A következő SQL-parancsokat Adminer **SQL command** oldalán futtasd **egyenként**. Minden művelet után nézd meg a Kafka UI-ban a `PAYMENT` topicot. A sor `9001` azonosítója segít a sok üzenet között megtalálni a megfelelő eseményt.
+Ez **nem INSERT**.
 
-**INSERT:**
+A sor már létezett a Debezium indulása előtt, a connector csak felvette a kezdeti állapotot.
+
+---
+
+## 10. Valódi UPDATE kipróbálása
+
+Adminerben menj az SQL parancs oldalra, és futtasd:
+
+```sql
+UPDATE PAYMENT
+SET
+    status = 'SETTLED',
+    amount = 13000.00,
+    updated_at = NOW(3)
+WHERE id = 1;
+```
+
+Ezután menj vissza:
+
+```text
+Kafka UI
+  → Topics
+  → bank-cdc.bank.PAYMENT
+  → Messages
+```
+
+Az új eseményben ezt kell látnod:
+
+```text
+op = u
+snapshot = false
+```
+
+Például:
+
+```json
+{
+  "before": {
+    "id": 1,
+    "amount": "12500.00",
+    "status": "COMPLETED"
+  },
+  "after": {
+    "id": 1,
+    "amount": "13000.00",
+    "status": "SETTLED"
+  },
+  "op": "u"
+}
+```
+
+A folyamat:
+
+```text
+SQL UPDATE
+   ↓
+MySQL COMMIT
+   ↓
+MySQL binlog
+   ↓
+Debezium
+   ↓
+Kafka
+```
+
+A Debezium **nem az Adminert figyeli**.
+
+Ugyanilyen CDC event keletkezne akkor is, ha a módosítást Java alkalmazás, batch vagy másik SQL kliens végezné.
+
+---
+
+## 11. A `source` blokk értelmezése
+
+Streaming eventnél például:
+
+```json
+"source": {
+  "connector": "mysql",
+  "db": "bank",
+  "table": "PAYMENT",
+  "snapshot": "false",
+  "server_id": 1,
+  "gtid": "...",
+  "file": "mysql-bin.000003",
+  "pos": 442
+}
+```
+
+Röviden:
+
+| Mező | Jelentés |
+| --- | --- |
+| `db` | Source adatbázis |
+| `table` | Source tábla |
+| `snapshot` | Snapshot vagy normál streaming event |
+| `file` | MySQL binlog fájl |
+| `pos` | Pozíció a binlogban |
+| `server_id` | A MySQL server azonosítója |
+| `gtid` | MySQL tranzakcióazonosító |
+
+MySQL-ben a `binlog file + position + GTID` segít megmondani, hol járunk a változásfolyamban.
+
+Oracle CDC-nél hasonló szerepe van a redo / SCN / logpozíció gondolkodásnak.
+
+---
+
+## 12. INSERT kipróbálása
+
+Adminerben:
 
 ```sql
 INSERT INTO PAYMENT
@@ -206,218 +469,341 @@ VALUES
   (9001, 1001, 12.34, 'HUF', 'NEW', NOW(3), NOW(3));
 ```
 
-**UPDATE:**
+Kafka UI-ban:
+
+```text
+op = c
+before = null
+after = új sor
+```
+
+A `c` jelentése:
+
+```text
+create / INSERT
+```
+
+---
+
+## 13. DELETE és tombstone kipróbálása
+
+Adminerben:
 
 ```sql
-UPDATE PAYMENT
-SET amount = 56.78, status = 'SETTLED', updated_at = NOW(3)
+DELETE FROM PAYMENT
 WHERE id = 9001;
 ```
 
-**DELETE:**
+A Kafka topicban először egy Debezium DELETE event jelenik meg:
 
-```sql
-DELETE FROM PAYMENT WHERE id = 9001;
+```text
+op = d
+before = törölt sor
+after = null
 ```
 
-Mindegyik önálló, commitolt változásként fut az Adminer alapértelmezett autocommit működésével. Nyitott tranzakcióban az események a commit után jelennek meg.
+Utána egy külön Kafka tombstone:
 
-Az ugyanezt végrehajtó Windows-demo:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\demo.ps1
+```text
+key   = ugyanaz a kulcs
+value = null
 ```
 
-Bashből:
+A DELETE event és a tombstone **két külön Kafka record**.
 
-```bash
-bash scripts/demo.sh
-```
+---
 
-A script egymás után hajtja végre a fizetés INSERT, UPDATE és DELETE műveletét. A `9001` demoazonosítóhoz tartozó esetleges korábbi sor takarítása további DELETE-eseményt is eredményezhet; ismételt futtatáskor az újabb Kafka-offseteket vizsgáld. Sikeres futtatás után maga a `9001` sor már nem szerepel a MySQL-táblában, az eseményei viszont megmaradnak a Kafka-topicban a megőrzési szabályok szerint.
+## 14. Debezium `op` értékek
 
-## 8. A módosítások megkeresése a Kafka UI-ban
-
-Nyisd meg a `bank-cdc.bank.PAYMENT` topic **Messages** nézetét, és frissítsd a beolvasást. A kulcs JSON-ként az elsődleges kulcsot tartalmazza, például:
-
-```json
-{ "id": 9001 }
-```
-
-Keresd ezt a kulcsot, és hasonlítsd össze az egyre növekvő Kafka-offseteket. A `9001` sorhoz a három adatváltozási esemény után egy negyedik, `null` értékű tombstone-üzenet is érkezik:
-
-| Művelet | `op` | `before` | `after` |
-| --- | --- | --- | --- |
-| Snapshot | `r` | `null` | A beolvasott sor |
-| INSERT | `c` | `null` | Az új sor |
-| UPDATE | `u` | A módosítás előtti sor | A módosítás utáni sor |
-| DELETE | `d` | A törölt sor | `null` |
-| Kafka tombstone | Nincs eseményboríték | Nincs | Az üzenet teljes értéke `null` |
-
-A DELETE és a tombstone **két külön Kafka-üzenet**, azonos kulccsal. A törlési eseményben van `op=d`, `before` és `after=null`; a tombstone teljes Kafka-értéke `null`, ezért nincs benne `op` sem. Kompaktált topicok esetén a tombstone jelzi a korábbi kulcs eltávolítását. A lab adatváltozási topicjaiban a DELETE és a tombstone egyaránt megfigyelhető a megőrzési időn belül.
-
-Ha a tombstone nem látszik, kapcsold ki a csak nem üres értékeket mutató szűrést, és a kulcs/offset alapján keresd. Egy olyan tartalomszűrő, amely például az `op` mezőt vagy az értékben az `id` mezőt keresi, elrejtheti a tombstone-t, mert annak nincs JSON-értéke. Egyes UI-nézetek `NULL` feliratként vagy üres értékként jelenítik meg.
-
-## 9. A Debezium-mezők értelmezése
-
-| Mező | Jelentés |
+| `op` | Jelentés |
 | --- | --- |
-| `before` | A változás előtti adatbázissor. INSERT és snapshot esetén `null`. |
-| `after` | A változás utáni adatbázissor. DELETE esetén `null`. |
-| `source` | A forrás metaadatai: adatbázis, tábla, binlogpozíció és snapshotjelző; a MySQL-esemény ideje is itt található. |
-| `op` | `r` = snapshot read, `c` = create/INSERT, `u` = UPDATE, `d` = DELETE. |
-| `ts_ms` | Az esemény connector általi feldolgozásának időbélyege, Unix epoch milliszekundumban. |
-| Kafka key | Az adatbázissor elsődleges kulcsa; itt a sor `id` értéke. |
-| Kafka offset | Az üzenet pozíciója egy Kafka-topic adott partíciójában. |
+| `r` | Snapshot read |
+| `c` | Create / INSERT |
+| `u` | UPDATE |
+| `d` | DELETE |
 
-A MySQL `binlog_format=ROW` és `binlog_row_image=FULL` beállítással fut. Ezért az UPDATE `before` és `after` mezőjében a teljes sor látható, nem csak a megváltozott oszlopok. A pénzösszegek stringként jelennek meg, például `"55.75"`, hogy a tizedes pontosság megmaradjon.
+---
 
-A példabeli frissítés rövidítve:
+## 15. Hasznos Kafka Connect REST hívások
 
-```json
-{
-  "before": { "id": 9001, "amount": "12.34", "status": "NEW" },
-  "after": { "id": 9001, "amount": "56.78", "status": "SETTLED" },
-  "source": { "db": "bank", "table": "PAYMENT", "snapshot": "false" },
-  "op": "u",
-  "ts_ms": 1760000001000
-}
-```
-
-A `ts_ms` nem tranzakciós sorszám, és nem garantál globális sorrendet két topic között. Kafka partíción belüli offsetekkel ellenőrizheted a beolvasott üzenetek sorrendjét; azonos kulcs eseményei ugyanabba a partícióba kerülnek. A connector által tárolt **forrásoffset** és a topic **Kafka-offsetje** eltérő fogalom: előbbi azt írja le, meddig jutott a connector a MySQL naplójában, utóbbi a Kafka-üzenet helyét jelöli.
-
-## 10. Restart és offset recovery teszt
-
-A teszt előtt legyen a connector és a task is `RUNNING`, és várd meg, hogy a kezdeti snapshot megjelenjen a két topicban.
-
-Windows:
+Connectorok listája:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\recovery-test.ps1
+Invoke-RestMethod http://localhost:8083/connectors
 ```
 
-Bash:
+Connector státusz:
 
-```bash
-bash scripts/recovery-test.sh
+```powershell
+Invoke-RestMethod http://localhost:8083/connectors/bank-mysql/status |
+  ConvertTo-Json -Depth 10
 ```
 
-A script a következő folyamatot mutatja be:
+Connector konfiguráció:
 
-1. Működő connector mellett létrehozza a `9002` fizetést, és hagy időt a feldolgozásra és offsetmentésre.
-2. **Csak a `connect` konténert állítja le**. MySQL, Kafka, Adminer és Kafka UI tovább fut.
-3. Leállított Connect mellett módosítja a `9002` fizetést, és létrehozza, majd törli a `9003` fizetést. Ezek a változások MySQL-ben már megtörténnek, miközben nincs futó Debezium-task.
-4. Újraindítja a `connect` szolgáltatást, és megvárja a `RUNNING` státuszt.
-5. A Debezium a mentett forrásoffsettől folytatja a binlog olvasását, és feldolgozza a kiesés közben történt változásokat.
+```powershell
+Invoke-RestMethod http://localhost:8083/connectors/bank-mysql/config |
+  ConvertTo-Json -Depth 10
+```
 
-Kafka UI-ban a `bank-cdc.bank.PAYMENT` topic újabb offsetjein keresd:
-
-- `id=9002`, `op=c`: a leállítás előtt létrehozott sor.
-- `id=9002`, `op=u`: a kiesés közben végrehajtott frissítés, benne a régi és az új sorral.
-- `id=9003`, `op=c`, majd `op=d`, majd ugyanennek a kulcsnak a tombstone-ja: a kiesés közben létrehozott és törölt sor.
-
-A recovery-script a Kafka-üzeneteket be is olvassa és ellenőrzi. A sikeres futás végén `PASS` eredményt ír ki; hiányzó UPDATE/INSERT/DELETE/tombstone vagy a tesztsorokra érkező új snapshot esetén hibával áll le. A Kafka UI-ban ugyanennek az eredménynek a kézi megfigyelését végezheted el. A `9002` sor `RECOVERED` állapotban megmarad, a `9003` sor törlődik.
-
-Különösen tanulságos a `9003`: újraindításkor már nincs a MySQL-táblában, mégis megkapod a létrehozási és törlési eseményét, mert Debezium a binlogból olvassa vissza a közben történt változásokat. Ez nem a pillanatnyi táblaállapot újbóli lekérdezése.
-
-Az új események streamingesemények, nem `op=r` snapshotok. A korábbi `op=r` üzenetek továbbra is ott lehetnek a topicban; az új Kafka-offseteket és a demoazonosítókat nézd. A normál Connect-restart nem indít új teljes snapshotot, mert a mentett offset és a sémaelőtörténet megmarad.
-
-Az offsetek REST-lekérdezése PowerShellből:
+Mentett source offset:
 
 ```powershell
 Invoke-RestMethod http://localhost:8083/connectors/bank-mysql/offsets |
   ConvertTo-Json -Depth 20
 ```
 
-Bashből:
+---
 
-```bash
-curl --fail-with-body http://localhost:8083/connectors/bank-mysql/offsets
-```
+## 16. Logok
 
-A forrásoffsetben a MySQL binlog fájlja és pozíciója, valamint egyéb állapotmezők szerepelhetnek. Egy normál, leállítás előtti offsetmentés után a connector innen tud folytatni. Az offsetmentés periodikus; váratlan összeomlás után néhány már elküldött esemény újra megjelenhet. A feldolgozás alapértelmezett viselkedése **at least once**, ezért a lab nem ígér teljesen duplikációmentes helyreállást.
+### Docker
 
-A MySQL-binlog is megmarad a MySQL-volume-ban. Ha a szükséges binlogot már törölték vagy lejárt, a forrásoffset önmagában nem elég a felzárkózáshoz. Ebben a rövid helyi tesztben a binlog-megőrzés bőven elegendő.
-
-## Opcionális teljes automatikus ellenőrzés
-
-Az elindított és regisztrált labot Python 3.10 vagy újabb verzióval is ellenőrizheted; ehhez nincs pip-csomagtelepítés. Windows alatt, telepített Python esetén:
+Kafka Connect:
 
 ```powershell
-py -3 .\tests\verify_cdc.py
+docker compose logs --tail=150 connect
 ```
 
-Linux/macOS alatt:
+MySQL:
 
-```bash
-python3 tests/verify_cdc.py
+```powershell
+docker compose logs --tail=100 mysql
 ```
 
-A teszt megvizsgálja a connector és task állapotát, az Adminer és Kafka UI elérhetőségét, mindkét tábla kezdeti snapshotját, a fizetés INSERT/UPDATE/DELETE/tombstone eseményeit és a Connect-only restart utáni offset recoveryt. A `9901`, `9902`, `9903` PAYMENT-azonosítókat használja és siker esetén eltakarítja őket; ezeket is hagyd szabadon. Nem töröl volume-okat. A korábbi snapshotüzeneteknek még elérhetőnek kell lenniük a topicban.
+### Podman
 
-Az eredmény az `artifacts/validation.json` fájlba kerül, a konkrét üzenetekkel és offsetekkel együtt külön bizonyítékfájlok is készülnek. Siker esetén a script nulla kilépési kódot és `PASS` sorokat ad, hiba esetén nem nulla kóddal tér vissza. A teszt saját maga is leállítja és újraindítja a Connectet, ezért futása alatt ne végezz párhuzamos SQL-demót vagy másik restarttesztet.
+Kafka Connect:
 
-A projekt elkészítésekor ténylegesen elvégzett ellenőrzéseket és azok futtatási körülményeit a [TEST-RESULTS.md](TEST-RESULTS.md) dokumentálja.
+```powershell
+podman compose logs --tail=150 connect
+```
 
-## Tartós állapot, leállítás és tiszta újrakezdés
+MySQL:
 
-A `mysql_data` volume tárolja az adatbázist és a binlogot. A `kafka_data` volume-ban a topicok mellett a Kafka Connect konfigurációs, offset- és státusztopicjai, illetve a Debezium sémaelőtörténete is megmarad. Emiatt a konténerek újraindítása után a connector ugyanazzal a konfigurációval és állapottal folytathatja a munkát.
+```powershell
+podman compose logs --tail=100 mysql
+```
 
-A szolgáltatások leállítása az adatok megőrzésével:
+---
 
-```bash
+## 17. Egyszerű restart / recovery próba
+
+A cél annak megfigyelése, hogy a Debezium nem csak az aktuális táblaállapotot kérdezi le, hanem a változásnaplóból folytatja a feldolgozást.
+
+### 1. Állítsd le csak a Kafka Connect service-t
+
+Docker:
+
+```powershell
+docker compose stop connect
+```
+
+Podman:
+
+```powershell
+podman compose stop connect
+```
+
+MySQL és Kafka maradjon futva.
+
+### 2. Adminerben módosíts egy rekordot
+
+Például:
+
+```sql
+UPDATE PAYMENT
+SET status = 'RECOVERED',
+    updated_at = NOW(3)
+WHERE id = 2;
+```
+
+A MySQL-ben a változás megtörténik, de a Debezium most nem fut.
+
+### 3. Indítsd vissza a Connectet
+
+Docker:
+
+```powershell
+docker compose start connect
+```
+
+Podman:
+
+```powershell
+podman compose start connect
+```
+
+### 4. Ellenőrizd a státuszt
+
+```powershell
+Invoke-RestMethod http://localhost:8083/connectors/bank-mysql/status |
+  ConvertTo-Json -Depth 10
+```
+
+### 5. Nézd meg Kafka UI-ban az új eseményt
+
+A Debezium a mentett source offset alapján folytatja a binlog olvasását, ezért a Connect leállása alatt történt változásnak is meg kell jelennie.
+
+```text
+Connect áll
+   ↓
+MySQL tovább változik
+   ↓
+változás bekerül a binlogba
+   ↓
+Connect újraindul
+   ↓
+Debezium folytatja a mentett pozíciótól
+   ↓
+event megjelenik Kafkában
+```
+
+---
+
+## 18. Környezet leállítása
+
+### Docker
+
+```powershell
 docker compose down
 ```
 
-Újraindítás:
+### Podman
 
-```bash
-docker compose up -d --wait
+```powershell
+podman compose down
 ```
 
-Ilyenkor egy már regisztrált connector is visszatér; nem kell újból létrehozni.
+Ez a volume-okat megtartja.
 
-**Teljes, adatvesztéssel járó újrakezdés** csak akkor, ha tényleg új snapshotot és üres Kafka-állapotot szeretnél:
+A következő induláskor az adatbázis és a Kafka állapota megmarad.
 
-```bash
+---
+
+## 19. Teljes tiszta újrakezdés
+
+Csak akkor használd, ha tényleg mindent törölni akarsz:
+
+### Docker
+
+```powershell
 docker compose down -v
-docker compose up -d --wait
+docker compose up -d
 ```
 
-Ez törli a lab MySQL-adatait, Kafka-üzeneteit és connectoroffsetjeit. Ezután ismét futtasd a regisztrációs scriptet. A connector törlése vagy a regisztrációs script újrafuttatása önmagában nem biztosít tiszta snapshot-resetet; az offsetek és topicok állapotát is figyelembe kell venni.
+### Podman
 
-## Debezium és IBM CDC: mentális megfeleltetés
+```powershell
+podman compose down -v
+podman compose up -d
+```
 
-| IBM CDC fogalom | Nagyjából kapcsolódó Debezium-fogalom |
+A `-v` törli többek között:
+
+- a MySQL adatokat,
+- a MySQL binlogot,
+- a Kafka topicokat,
+- a Kafka Connect offseteket,
+- a connector korábbi állapotát.
+
+Ezután a connector regisztrációját újra el kell végezni, és új kezdeti snapshot készül.
+
+---
+
+## 20. Fontos fájlok
+
+```text
+debezium-cdc/
+├── docker-compose.yml
+├── connectors/
+│   └── bank-mysql.json
+├── mysql/
+│   └── init.sql
+├── scripts/
+├── tests/
+└── README.md
+```
+
+### `docker-compose.yml`
+
+A local runtime:
+
+```text
+MySQL
+Kafka
+Kafka Connect + Debezium
+Kafka UI
+Adminer
+```
+
+### `mysql/init.sql`
+
+Létrehozza:
+
+```text
+bank adatbázis
+ACCOUNT tábla
+PAYMENT tábla
+kezdeti rekordok
+Debezium technikai user
+```
+
+### `connectors/bank-mysql.json`
+
+Megmondja a Debeziumnak:
+
+```text
+melyik MySQL-t figyelje
+melyik adatbázist figyelje
+melyik táblákat figyelje
+milyen topic prefixet használjon
+készítsen-e initial snapshotot
+```
+
+---
+
+## 21. IBM CDC és Debezium – mentális megfeleltetés
+
+Ez nem 1:1 termékmegfeleltetés, csak segítség a fogalmak összekötéséhez.
+
+| IBM CDC | Debezium |
 | --- | --- |
-| Source CDC Engine | Debezium connector, amely a forrásadatbázis naplóját olvassa |
-| Subscription | Connector konfigurációja |
-| Table Mapping | `table.include.list`, illetve egyéb táblaszűrési és adatátalakítási konfiguráció |
-| Bookmark | A connector mentett forrásoffsetje |
-| Refresh | Kezdeti snapshot |
-| Mirroring | Folyamatos streaming a változásnaplóból |
+| Source CDC Engine | Debezium source connector |
+| Subscription | Connector konfiguráció / connector instance |
+| Table Mapping | `table.include.list` és további filter/config |
+| Bookmark | Source offset |
+| Refresh | Snapshot |
+| Mirroring | Streaming |
 
-Ez segít a már ismert fogalmakhoz kapcsolni a lab működését, de **nem 1:1 funkcionális megfeleltetés**. Például ez a Debezium-lab Kafka-topicokra publikál eseményeket; önmagában nem alkalmazza a módosításokat egy céladatbázis tábláin.
+A Debezium Kafka Connectes modelljében nincs külön IBM CDC-szerű Kafka target engine. A source connector a Kafka Connect runtime-on keresztül Kafka topicokba ír.
 
-## Gyakori hibák
+---
 
-- **A Docker daemon nem érhető el:** indítsd el Docker Desktopot, várd meg az engine indulását, és ellenőrizd a `docker info` kimenetét.
-- **Foglalt port:** állítsd le az adott portot használó helyi szolgáltatást, vagy módosítsd a Compose hostportját és a hozzá tartozó böngésző-/scriptcímet együtt.
-- **Adminer nem csatlakozik:** az Adminer szervermezője `mysql`, az adatbázis `bank`; ellenőrizd a MySQL állapotát a `docker compose ps` paranccsal.
-- **Connector `FAILED`:** a státusz `trace` mezője és a Connect-log megmondja az okot. A MySQLnek egészségesen kell futnia a connector regisztrációja előtt.
-- **Nem látok snapshotot:** a Kafka UI üzenetnézete legyen `Beginning/earliest`, és a megfelelő `bank-cdc.bank.*` topicot nézd. Korábban használt volume mellett a connector normálisan streaminggel folytathatja a munkát.
-- **Nem látok friss módosítást:** commitold a tranzakciót, ellenőrizd a task `RUNNING` állapotát, majd indíts új beolvasást a Kafka UI-ban.
-- **UPDATE-ben hiányos a `before`:** ellenőrizd, hogy a futó MySQL `binlog_row_image` értéke `FULL`; a projekt ezt állítja be.
-- **Tombstone nem látszik:** töröld az értéktartalomra épülő szűrőt, és a kulcsot, partíciót, illetve offsetet nézd.
-- **Init SQL módosítása nem változtatja az adatbázist:** meglévő MySQL-volume esetén az init nem fut újra. A teljes reset törli a labadatokat; csak tudatos újrakezdéshez használd.
+## 22. Röviden: mit láttunk?
 
-Hasznos ellenőrző SQL Adminerben:
-
-```sql
-SHOW VARIABLES WHERE Variable_name IN
-  ('log_bin', 'binlog_format', 'binlog_row_image', 'server_id');
-SELECT * FROM ACCOUNT ORDER BY id;
-SELECT * FROM PAYMENT ORDER BY id;
+```text
+1. MySQL-ben már léteztek ACCOUNT és PAYMENT sorok
+2. Elindítottuk a local környezetet
+3. Regisztráltuk a bank-mysql Debezium connectort
+4. Debezium initial snapshotot készített
+5. A meglévő sorok op=r eventként megjelentek Kafkában
+6. Adminerben UPDATE-et hajtottunk végre
+7. A változás bekerült a MySQL binlogba
+8. Debezium kiolvasta
+9. Kafka topicban op=u event jelent meg
+10. before = régi állapot
+11. after = új állapot
 ```
 
-A CDC-lab működését akkor igazoltad helyben, ha láttad a két tábla kezdeti `op=r` eseményeit, a demo `c/u/d` és tombstone üzeneteit, valamint a Connect-kiesés közben végrehajtott változások utólagos feldolgozását, új snapshot nélkül.
+Ez a CDC alapfolyam:
+
+```text
+adatbázis-változás
+      ↓
+transaction log / binlog
+      ↓
+Debezium
+      ↓
+Kafka event
+```
