@@ -720,8 +720,9 @@ debezium-cdc/
 │   └── bank-mysql.json
 ├── mysql/
 │   └── init.sql
-├── scripts/
-├── tests/
+├── java-consumer/
+│   ├── pom.xml
+│   └── src/main/java/hu/mezeimate/cdc/PaymentConsumer.java
 └── README.md
 ```
 
@@ -807,3 +808,56 @@ Debezium
       ↓
 Kafka event
 ```
+
+---
+
+## Java CDC consumer
+
+A `java-consumer/` egy egyszerű, host gépen futó Java 17 + Maven alkalmazás. A
+`bank-cdc.bank.PAYMENT` topic eseményeit olvassa a `localhost:9092` brokerről,
+`cdc-lab-java-consumer` consumer groupként. Nem kell hozzá Spring Boot vagy külön
+Java-konténer; a kód egyetlen osztályban, a `PaymentConsumer.java` fájlban található.
+
+A konzolon minden rekordnál látható a Kafka partition, offset és key. A program
+az `r/c/u/d` műveleteket `SNAPSHOT/INSERT/UPDATE/DELETE` néven írja ki, a
+`before` és `after` sorokat mezőnként jeleníti meg. A null értékű Kafka rekordot
+külön `TOMBSTONE` eseményként kezeli.
+
+Előbb indítsd el a fenti Compose labot és regisztráld a `bank-mysql` connectort.
+Szükséges egy **JDK 17** és egy helyben elérhető Maven; a `mvn -version`
+kimenetében ellenőrizheted a használt Java-verziót.
+
+Fordítás és indítás Windows PowerShellből, a repó gyökeréből:
+
+```powershell
+cd .\java-consumer
+mvn clean package
+mvn exec:java
+```
+
+Linux/macOS alatt ugyanez:
+
+```bash
+cd java-consumer
+mvn clean package
+mvn exec:java
+```
+
+IntelliJben nyisd meg a `java-consumer/pom.xml` fájlt Maven projektként, válaszd a
+17-es JDK-t, majd futtasd a `hu.mezeimate.cdc.PaymentConsumer.main()` metódust.
+Terminálból a programot **Ctrl+C**-vel állíthatod le; a shutdown hook
+`consumer.wakeup()` hívással megszakítja a pollt és bezárja a consumert.
+
+**Offsetek:** az `auto.offset.reset=earliest` csak akkor lép életbe, ha a groupnak
+még nincs mentett offsetje, vagy az már nem érhető el a Kafka megőrzési szabályai
+miatt. Első futáskor így a topicban még meglevő legrégebbi eseménytől indul. A
+program minden teljesen kiírt rekordcsomag után `commitSync()` hívással a Kafka
+normál group-offsetjét menti. Ugyanazzal a group ID-val újraindítva már a mentett
+pozíciótól folytatja, nem olvassa újra automatikusan az egész topicot. Nincs saját
+offsetfájl. Ha a kiírás és a commit között áll le a folyamat, az utolsó csomag
+újra megjelenhet; ez a példa at least once feldolgozást használ.
+
+Az olvasás és az offset commit **nem törli a Kafka-üzeneteket**: azok a Kafka
+UI-ban továbbra is láthatók a topic retention beállításáig. Ha több példányt
+indítasz azonos group ID-val, megosztják egymás között a partíciókat; a lab egy
+partíciója miatt egyszerre csak az egyik példány fog eseményeket olvasni.
