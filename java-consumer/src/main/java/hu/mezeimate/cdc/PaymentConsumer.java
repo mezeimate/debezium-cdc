@@ -8,6 +8,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
@@ -19,19 +21,10 @@ public class PaymentConsumer {
     private static final String TOPIC = "bank-cdc.bank.PAYMENT";
     private static final String GROUP = "cdc-lab-java-consumer";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Logger LOGGER = LoggerFactory.getLogger(PaymentConsumer.class);
 
     public static void main(String[] args) throws JsonProcessingException {
-        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "warn");
-
-        Properties properties = new Properties();
-        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BROKER);
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP);
-        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties);
+        KafkaConsumer<String, String> consumer = getStringStringKafkaConsumer();
         AtomicBoolean running = new AtomicBoolean(true);
         Thread consumerThread = Thread.currentThread();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -45,17 +38,17 @@ public class PaymentConsumer {
             }
         }, "consumer-shutdown"));
 
-        System.out.printf("Kafka: %s | Topic: %s | Group: %s%n", BROKER, TOPIC, GROUP);
-        System.out.println("Waiting for CDC events. Stop with Ctrl+C.");
+        LOGGER.info("Kafka: {} | Topic: {} | Group: {}", BROKER, TOPIC, GROUP);
+        LOGGER.info("Waiting for CDC events. Stop with Ctrl+C.");
 
         try {
             consumer.subscribe(List.of(TOPIC));
             while (running.get()) {
-                var records = consumer.poll(Duration.ofSeconds(1));
-                for (var record : records) {
-                    printRecord(record);
+                var consumerRecords = consumer.poll(Duration.ofSeconds(1));
+                for (var consumerRecord : consumerRecords) {
+                    printRecord(consumerRecord);
                 }
-                if (!records.isEmpty()) {
+                if (!consumerRecords.isEmpty()) {
                     // Kafka stores the group's next offset after the entire batch is printed.
                     consumer.commitSync();
                 }
@@ -67,23 +60,35 @@ public class PaymentConsumer {
         } finally {
             running.set(false);
             consumer.close(Duration.ofSeconds(5));
-            System.out.println("Consumer stopped.");
+            LOGGER.info("Consumer stopped.");
         }
     }
 
-    private static void printRecord(ConsumerRecord<String, String> record) throws JsonProcessingException {
-        System.out.println("--------------------------------------------------");
-        System.out.println("Partition: " + record.partition());
-        System.out.println("Offset: " + record.offset());
-        System.out.println("Key: " + record.key());
+    private static KafkaConsumer<String, String> getStringStringKafkaConsumer() {
+        Properties properties = new Properties();
+        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BROKER);
+        properties.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP);
+        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
 
-        if (record.value() == null) {
-            System.out.println("Operation: TOMBSTONE");
-            System.out.println("Before/After: not present (null Kafka value)");
+        return new KafkaConsumer<>(properties);
+    }
+
+    private static void printRecord(ConsumerRecord<String, String> consumerRecord) throws JsonProcessingException {
+        LOGGER.info("--------------------------------------------------");
+        LOGGER.info("Partition: {}", consumerRecord.partition());
+        LOGGER.info("Offset: {}", consumerRecord.offset());
+        LOGGER.info("Key: {}", consumerRecord.key());
+
+        if (consumerRecord.value() == null) {
+            LOGGER.info("Operation: TOMBSTONE");
+            LOGGER.info("Before/After: not present (null Kafka value)");
             return;
         }
 
-        JsonNode event = JSON.readTree(record.value());
+        JsonNode event = JSON.readTree(consumerRecord.value());
         String op = event.path("op").asText("?");
         String operation = switch (op) {
             case "r" -> "SNAPSHOT";
@@ -92,22 +97,25 @@ public class PaymentConsumer {
             case "d" -> "DELETE";
             default -> "UNKNOWN";
         };
-        System.out.printf("Operation: %s (op=%s)%n", operation, op);
+        LOGGER.info("Operation: {} (op={})", operation, op);
         JsonNode before = event.path("before");
         JsonNode after = event.path("after");
         JsonNode payment = after.isObject() ? after : before;
-        System.out.println("Payment ID: " + payment.path("id").asText("unknown"));
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Payment ID: {}", payment.path("id").asText("unknown"));
+        }
         printRow("Before", before);
         printRow("After", after);
     }
 
     private static void printRow(String label, JsonNode row) {
         if (row.isNull() || row.isMissingNode()) {
-            System.out.println(label + ": null");
+            LOGGER.info("{}: null", label);
             return;
         }
-        System.out.println(label + ":");
-        row.fields().forEachRemaining(field ->
-                System.out.printf("  %s: %s%n", field.getKey(), field.getValue().asText("null")));
+        LOGGER.info("{}:", label);
+        row.properties().forEach(field ->
+                LOGGER.info("  {}: {}", field.getKey(), field.getValue().asText("null"))
+        );
     }
 }
